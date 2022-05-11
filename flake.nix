@@ -10,6 +10,7 @@
         (python3.withPackages (pkgs: with pkgs; [
           pandas
           matplotlib
+          future
         ]))
       ];
     });

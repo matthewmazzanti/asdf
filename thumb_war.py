@@ -1,271 +1,258 @@
-import pandas as pd
-import logging
-# logging.basicConfig(format='%(levelname)s:%(message)s', level=logging.DEBUG)
+from itertools import combinations, product
 
 
-class Node:
-    index = 0
+class Node(object):
+    _name = 0
 
     def __init__(self):
+        self.name = Node._name
+        Node._name += 1
         self.neighbors = []
-        self.is_visited = False
+        self.match = None
+        self.mark = False
         self.parent = None
-        self.mate = None
-        self.index = Node.index
-        Node.index += 1
+        self.root = None
 
-    def __repr__(self):
-        return str(self.index)
-
-
-class SuperNode(Node):
-
-    def __init__(self):
-        Node.__init__(self)
-        self.subnodes = []
-        self.original_edges = []
-
-    def circle(self, node):
-        for i, v in enumerate(self.subnodes):
-            if v == node:
-                break
-        assert i < len(self.subnodes)
-
-        if i > 0 and self.subnodes[i].mate == self.subnodes[i-1] or i == 0 and self.subnodes[i].mate == self.subnodes[-1]:
-            return self.subnodes[i::-1] + self.subnodes[:i:-1]
-        else:
-            return self.subnodes[i::] + self.subnodes[:i]
-
-
-class Path:
-
-    def __init__(self):
-        self.nodes = []
-
-    def head(self):
-        return self.nodes[0]
-
-    def tail(self):
-        return self.nodes[-1]
-
-    def replace(self, snode):
-        index = self.nodes.index(snode)
-        nodes = self.nodes[:index]
-        cur_node = nodes[-1]
-        for edge in snode.original_edges:
-            if edge[0] == cur_node:
-                cur_node = edge[1]
-                break
-            if edge[1] == cur_node:
-                cur_node = edge[0]
-                break
-        while cur_node.parent != snode.parent:
-            nodes.append(cur_node)
-            nodes.append(cur_node.mate)
-            for node in cur_node.mate.neighbors:
-                if node != cur_node and node in snode.subnodes:
-                    cur_node = node
-                    break
-            else:
-                raise Exception("replace error.")
-        nodes.append(cur_node)
-        self.nodes = nodes + self.nodes[index+1:]
-
-    def __repr__(self):
-        return str(self.nodes)
-
-
-class Match:
-    def __init__(self, nodes):
-        self.nodes = nodes
-        self.freenodes = []
-        for node in nodes:
-            self.freenodes.append(node)
-        self.supernodes = []
-
-    def from_edges(N, edges):
-        nodes = [Node() for i in range(N)]
-        for i, j in edges:
-            nodes[i].neighbors.append(nodes[j])
-        return Match(nodes)
-
-    def clear_nodes(self):
-        for node in self.nodes:
-            node.is_visited = False
-            node.parent = None
-
-    def find_augmenting_path(self, root):
-        self.clear_nodes()
-        queue = [root]
-        while len(queue) > 0:
-            cur_node = queue.pop(0)
-            cur_node.is_visited = True
-            for node in cur_node.neighbors:
-                if node == cur_node.parent:
-                    continue
-
-                elif node.is_visited:
-                    cycle = self.find_cycles(node, cur_node)
-                    if len(cycle) % 2 == 1:
-                        logging.debug('blossom: {}'.format(cycle))
-                        snode = self.shrink_blossom(cycle)
-                        self.supernodes.append(snode)
-                        for v in cycle:
-                            if v in queue:
-                                queue.remove(v)
-                        snode.is_visited = True
-                        while node.parent in cycle:
-                            node = node.parent
-                        snode.parent = node.parent
-                        snode.mate = node.mate
-                        queue.insert(0, snode)
-                        break
-
-                elif node.mate is None:
-                    node.parent = cur_node
-                    return self.construct_augmenting_path(node)
-
-                elif node.mate != cur_node:
-                    node.is_visited = True
-                    node.mate.is_visited = True
-                    node.parent = cur_node
-                    node.mate.parent = node
-                    queue.append(node.mate)
-
-        raise Exception('cannot find an augmenting path')
-
-    def unmatched_nodes(self):
-        self.maximum_matching()
-
-        count = 0
-        for node in self.nodes:
-            if node.mate is not None:
-                count += 1
-
-        return len(self.nodes) - count
-
-    def maximum_matching(self):
-        while len(self.freenodes) > 0:
-            logging.debug('freenodes: {}'.format(self.freenodes))
-            for node in self.freenodes:
-                try:
-                    path = self.find_augmenting_path(node)
-                    logging.debug('augmenting path: {}'.format(path.nodes))
-                    self.invert_path(path)
-                    self.freenodes.remove(path.nodes[0])
-                    self.freenodes.remove(path.nodes[-1])
-                    break
-                except Exception as e:
-                    logging.info(e)
-            else:
-                logging.info('Tried all free nodes, no more augmenting path.')
-                break
-
-            for node in self.nodes:
-                if node.mate:
-                    assert node.mate.mate == node
-
-    def invert_path(self, path):
-        assert len(path.nodes) % 2 == 0
-        for i in range(0, len(path.nodes), 2):
-            path.nodes[i].mate = path.nodes[i+1]
-            path.nodes[i+1].mate = path.nodes[i]
-
-    def construct_augmenting_path(self, node):
-        path = Path()
-        path.nodes.append(node)
-        node = node.parent
-        path.nodes.append(node)
-        while node.mate is not None:
+    def ancestor_path(self):
+        """Compute the path from a node to its root"""
+        path = [self]
+        node = self
+        while node != node.root:
             node = node.parent
-            path.nodes.append(node)
-
-        while len(self.supernodes) > 0:
-            snode = self.supernodes.pop()
-            self.expand_supernode(snode)
-            path.replace(snode)
-
-        while path.nodes[0].mate is not None:
-            path.nodes.insert(path.nodes[0].parent, 0)
-
-        while path.nodes[-1].mate is not None:
-            path.nodes.append(path.nodes[-1].parent)
-
+            path.append(node)
         return path
 
-    def find_cycles(self, node1, node2):
-        def find_ancestors(node):
-            ancestors = [node]
-            while node.parent is not None:
-                node = node.parent
-                ancestors.append(node)
-            return ancestors
+    def cycle_aug_path(self, match_node, cycle):
+        """Compute an augmenting path on a cycle graph"""
+        idx1 = cycle.index(self)
+        idx2 = cycle.index(match_node)
+        path = []
 
-        ancestors1 = find_ancestors(node1)
-        ancestors2 = find_ancestors(node2)
-        i = len(ancestors1) - 1
-        j = len(ancestors2) - 1
-        while ancestors1[i] == ancestors2[j]:
-            i -= 1
-            j -= 1
+        if (idx1 > 0 and idx2 == idx1 - 1) or (idx1 == 0 and idx2 == len(cycle) - 1):
+            reverse_cycle = cycle[idx1::-1] + cycle[:idx1:-1]
+            for node in reverse_cycle:
+                path.append(node)
+                if node.match not in reverse_cycle:
+                    return path
 
-        cycle = ancestors1[:i+1] + ancestors2[j+1::-1]
-        return cycle
-
-    def shrink_blossom(self, blossom):
-        snode = SuperNode()
-        for node in blossom:
-            snode.subnodes.append(node)
-            for adj_node in node.neighbors:
-                if adj_node not in blossom:
-                    snode.original_edges.append((node, adj_node))
-                    if adj_node.parent in blossom:
-                        adj_node.parent = snode
-
-        for node1, node2 in snode.original_edges:
-            node1.neighbors.remove(node2)
-            node2.neighbors.remove(node1)
-            node2.neighbors.append(snode)
-            snode.neighbors.append(node2)
-
-        return snode
-
-    def expand_supernode(self, snode):
-        assert isinstance(snode, SuperNode)
-        for node1, node2 in snode.original_edges:
-            node1.neighbors.append(node2)
-            node2.neighbors.append(node1)
-            node2.neighbors.remove(snode)
-            snode.neighbors.remove(node2)
+        else:
+            forward_cycle = cycle[idx1::] + cycle[:idx1]
+            for node in forward_cycle:
+                path.append(node)
+                if node.match not in forward_cycle:
+                    return path
 
 
-def step(x, y):
-    if x < y:
-        y = y - x
-        x = x + x
-    else:
-        x = x - y
-        y = y + y
+class Supernode(Node):
+    def __init__(self, cycle=None):
+        super(Supernode, self).__init__()
+        self.cycle = cycle
 
-    return (x, y)
+    def contract_nodelist(self, nodelist):
+        """Contract a cycle to a supernode"""
+        # Remove cycle from nodelist
+        nodelist = [node for node in nodelist if node not in self.cycle]
+        nodelist.append(self)
+
+        # Compute supernode neighbors
+        for node in self.cycle:
+            if node.match and node.match not in self.cycle:
+                self.match = node.match
+            for neighbor in node.neighbors:
+                if neighbor not in self.cycle:
+                    self.neighbors.append(neighbor)
+        self.neighbors = list(set(self.neighbors))
+
+        # Modify node neighbors if neighbor in cycle
+        for node in nodelist:
+            if node.match in self.cycle:
+                node.match = self
+            node.neighbors = [
+                neighbor for neighbor in node.neighbors if neighbor not in self.cycle
+            ]
+            if node in self.neighbors:
+                node.neighbors.append(self)
+
+        return nodelist
+
+    def expand_nodelist(self, nodelist):
+        """Expand a supernode to a cycle"""
+        # Remove supernode from nodelist
+        nodelist = [node for node in nodelist if node is not self]
+        for node in nodelist:
+            node.neighbors = [
+                neighbor for neighbor in node.neighbors if neighbor is not self
+            ]
+
+        # Modify node neighbors if node is cycle neighbor and not in cycle
+        for cnode in self.cycle:
+            nodelist.append(cnode)
+            if cnode.match and cnode.match not in self.cycle:
+                cnode.match.match = cnode
+            for node in cnode.neighbors:
+                if node not in self.cycle:
+                    node.neighbors.append(cnode)
+
+        return nodelist
+
+    def expand_path(self, path, cycle):
+        """
+        Replace supernode in augmenting path with corresponding cycle nodes
+        """
+        if self not in path:
+            return path
+
+        elif self == path[0]:
+            for node in cycle:
+                if path[1] in node.neighbors:
+                    if node.match:
+                        cpath = node.cycle_aug_path(node.match, cycle)
+                    else:
+                        cpath = [node]
+                    return cpath[::-1] + path[1:]
+
+        elif self == path[-1]:
+            for node in cycle:
+                if path[-2] in node.neighbors:
+                    if node.match:
+                        cpath = node.cycle_aug_path(node.match, cycle)
+                    else:
+                        cpath = [node]
+                    return path[:-1] + cpath
+
+        else:
+            idx = path.index(self)
+            if path.index(self.match) == idx - 1:
+                for node in cycle:
+                    if path[idx + 1] in node.neighbors:
+                        cpath = node.cycle_aug_path(node.match, cycle)
+                        return path[:idx] + cpath[::-1] + path[idx + 1:]
+
+            elif path.index(self.match) == idx + 1:
+                for node in cycle:
+                    if path[idx - 1] in node.neighbors:
+                        cpath = node.cycle_aug_path(node.match, cycle)
+                        return path[:idx] + cpath + path[idx + 1:]
 
 
-def mod_step(x, y):
-    s = x + y
-    x = (2 * x) % s
-    y = s - x
-    return x, y
+class Graph:
+    def __init__(self, nodes):
+        self.nodes = {node.name: node for node in nodes}
+        self.edges = None
 
+    def compute_edges(self):
+        self.edges = {}
+        for key in self.nodes:
+            for node in self.nodes[key].neighbors:
+                self.edges[tuple(sorted([key, node.name]))] = 1
 
-def simulate(x, y):
-    seen = set()
-    while True:
-        x, y = mod_step(x, y)
-        if x in seen:
-            break
-        seen.add(x)
+    def mark_edges(self, node1, node2):
+        self.edges[tuple(sorted([node1.name, node2.name]))] = 0
 
-    return len(seen)
+    def clean_graph(self):
+        for key in self.nodes:
+            self.nodes[key].mark = False
+            self.nodes[key].parent = None
+            self.nodes[key].root = None
+
+    def compute_size_matching(self):
+        """Compute number of matched pairs"""
+        size = 0
+        for key in self.nodes:
+            if self.nodes[key].match:
+                size += 1
+        assert size % 2 == 0
+        return size
+
+    def create_matching_dict(self):
+        """Create dictionary of matched pairs"""
+        matching_dict = {}
+        for key in self.nodes:
+            if self.nodes[key].match:
+                matching_dict[key] = self.nodes[key].match.name
+        return matching_dict
+
+    def find_max_matching(self):
+        """Wrapper function for computing maximum matching"""
+        path = self.find_aug_path()
+        if not path:
+            return self
+        else:
+            self.aug_old_matching(path)
+            return self.find_max_matching()
+
+    def find_aug_path(self):
+        """Edmonds algorithm for computing maximum matching"""
+        self.clean_graph()
+        self.compute_edges()
+
+        exposed_node = [
+            node for node in self.nodes.values()
+            if node.match is None
+        ]
+        for node in exposed_node:
+            node.parent = node
+            node.root = node
+
+        for node in exposed_node:
+            if not node.mark:
+                for adj_node in node.neighbors:
+                    if self.edges[tuple(sorted([node.name, adj_node.name]))]:
+                        if adj_node not in exposed_node:
+                            adj_node.parent = node
+                            adj_node.root = node.root
+                            adj_node.mark = True  # odd distance from root
+                            self.mark_edges(node, adj_node)
+                            exposed_node.append(adj_node)
+
+                            adj_match = adj_node.match
+                            adj_match.parent = adj_node
+                            adj_match.root = adj_node.root
+                            self.mark_edges(adj_node, adj_match)
+                            exposed_node.append(adj_match)
+                        else:
+                            if not (len(adj_node.ancestor_path()) % 2):
+                                self.mark_edges(node, adj_node)
+                            else:
+                                if node.root != adj_node.root:
+                                    path1 = node.ancestor_path()
+                                    path2 = adj_node.ancestor_path()
+                                    return path1[::-1] + path2
+                                else:
+                                    return self.blossom(node, adj_node)
+                node.mark = True
+
+        return []
+
+    def blossom(self, node1, node2):
+        """Find augmenting path on blossom (cycle)"""
+        path1 = node1.ancestor_path()
+        path2 = node2.ancestor_path()
+        cycle = path1[::-1] + path2[:-1]
+
+        # Contract cycle nodes to supernode
+        snode = Supernode(cycle)
+        nodelist = snode.contract_nodelist(self.nodes.values())
+        self.nodes = {node.name: node for node in nodelist}
+        self.compute_edges()
+        aug_path = self.find_aug_path()
+
+        # Expand supernode back to original cycle nodes
+        aug_path = snode.expand_path(aug_path, cycle)
+        nodelist = snode.expand_nodelist(self.nodes.values())
+        self.nodes = {node.name: node for node in nodelist}
+        self.compute_edges()
+
+        return aug_path
+
+    @staticmethod
+    def aug_old_matching(path):
+        """Apply augmenting path to current matching on graph"""
+        for idx, node in enumerate(path):
+            if (idx + 1) % 2:
+                node.match = path[idx + 1]
+            else:
+                node.match = path[idx - 1]
 
 
 def terminates(x, y):
@@ -284,22 +271,27 @@ def gcd(x, y):
     return x
 
 
-def test(side, offset=1):
-    def test2(x):
-        for y in range(offset, side + offset):
-            yield (x, y)
+def solution(xs):
+    indices = {}
+    for i, x in enumerate(xs):
+        if x not in indices:
+            indices[x] = set()
 
-    for x in range(offset, side + offset):
-        yield test2(x)
+        indices[x].add(i)
+
+    nodes = [Node() for _ in xs]
+    for x, y in combinations(indices.keys(), 2):
+        if terminates(x, y):
+            continue
+
+        for i, j in product(indices[x], indices[y]):
+            nodes[i].neighbors.append(nodes[j])
+            nodes[j].neighbors.append(nodes[i])
+
+    graph = Graph(nodes)
+    graph.find_max_matching()
+    return len(nodes) - graph.compute_size_matching()
 
 
-pd.set_option('display.max_rows', 100)
-pd.set_option('display.max_columns', 100)
-pd.set_option('display.width', 1000)
-
-f = pd.DataFrame(data=test(100))
-f.index += 1
-f.columns += 1
-
-m = f.applymap(lambda x: not terminates(x[0], x[1]))
-print(m)
+print(solution([1, 1]))
+print(solution([x for x in range(1, 102)]))
